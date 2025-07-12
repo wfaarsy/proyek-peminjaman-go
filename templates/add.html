@@ -1,0 +1,79 @@
+<<<<<<< HEAD
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="row justify-content-center content-animated">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">{{.Title}}</h4>
+            </div>
+            <div class="card-body">
+                <form action="/add" method="post">
+                    <div class="mb-3">
+                        <label for="nama_peminjam" class="form-label">Nama Peminjam</label>
+                        <input type="text" class="form-control" id="nama_peminjam" name="nama_peminjam" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="nama_barang" class="form-label">Nama Barang / Peralatan</label>
+                        <input type="text" class="form-control" id="nama_barang" name="nama_barang" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="jumlah" class="form-label">Jumlah</label>
+                        <input type="number" class="form-control" id="jumlah" name="jumlah" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tanggal_pinjam" class="form-label">Tanggal Pinjam</label>
+                        <input type="date" class="form-control" id="tanggal_pinjam" name="tanggal_pinjam" required>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-end">
+                        <a href="/" class="btn btn-secondary me-2">Batal</a>
+                        <button type="submit" class="btn btn-primary">Simpan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+=======
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="row justify-content-center content-animated">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">{{.Title}}</h4>
+            </div>
+            <div class="card-body">
+                <form action="/add" method="post">
+                    <div class="mb-3">
+                        <label for="nama_peminjam" class="form-label">Nama Peminjam</label>
+                        <input type="text" class="form-control" id="nama_peminjam" name="nama_peminjam" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="nama_barang" class="form-label">Nama Barang / Peralatan</label>
+                        <input type="text" class="form-control" id="nama_barang" name="nama_barang" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="jumlah" class="form-label">Jumlah</label>
+                        <input type="number" class="form-control" id="jumlah" name="jumlah" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tanggal_pinjam" class="form-label">Tanggal Pinjam</label>
+                        <input type="date" class="form-control" id="tanggal_pinjam" name="tanggal_pinjam" required>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-end">
+                        <a href="/" class="btn btn-secondary me-2">Batal</a>
+                        <button type="submit" class="btn btn-primary">Simpan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+>>>>>>> 62ec457a206d54644e9d898a2c7c68aab1d741d8

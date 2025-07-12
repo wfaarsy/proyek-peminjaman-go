@@ -1,0 +1,10 @@
+# File database lokal
+peminjaman.db
+
+# File binary hasil kompilasi
+main
+main.exe
+
+# Folder-folder sistem
+.idea/
+.vscode/
