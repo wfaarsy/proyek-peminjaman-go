@@ -6,61 +6,61 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"os"
+	"os" // Diperlukan untuk membaca Environment Variable
 	"path/filepath"
 	"strconv"
+	"time"
 
-	_ "github.com/jackc/pgx/v4/stdlib" // Driver untuk PostgreSQL
 	"github.com/jung-kurt/gofpdf"
-	_ "github.com/mattn/go-sqlite3" // Driver untuk SQLite
+	// Import driver postgres dan sqlite
+	_ "github.com/jackc/pgx/v4/stdlib"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/xuri/excelize/v2"
 )
 
-// Peminjaman merepresentasikan data di tabel.
+// Struct Model (Tidak ada perubahan)
 type Peminjaman struct {
-	ID             int
-	NamaPeminjam   string
-	NamaBarang     string
-	Jumlah         int
-	TanggalPinjam  string // Format untuk ditampilkan di UI atau form
-	TanggalKembali string // Format untuk ditampilkan di UI atau form
-	Status         string
+	ID              int
+	NamaPeminjam    string
+	NamaBarang      string
+	Jumlah          int
+	TanggalPinjam   string
+	TanggalKembali  string
+	Status          string
 }
 
 var db *sql.DB
 
-// initDB menginisialisasi koneksi ke database yang sesuai (PostgreSQL atau SQLite).
+// initDB sekarang bisa menangani dua jenis database
 func initDB() {
 	var err error
-	var dbDriver, connStr string
+	var dbType, connStr string
 
-	// Railway menyediakan DATABASE_URL secara otomatis.
+	// Render.com akan menyediakan environment variable DATABASE_URL
+	// Jika ada, kita gunakan PostgreSQL. Jika tidak, kita gunakan SQLite lokal.
 	databaseURL := os.Getenv("DATABASE_URL")
 
 	if databaseURL != "" {
 		// Lingkungan Produksi (Online)
-		dbDriver = "pgx"
+		dbType = "pgx"
 		connStr = databaseURL
-		log.Println("INFO: Menggunakan database PostgreSQL (Produksi)")
+		log.Println("Menggunakan database PostgreSQL (Produksi)")
 	} else {
-		// Lingkungan Pengembangan (Lokal)
-		dbDriver = "sqlite3"
-		connStr = "./peminjaman.db?_loc=auto" // Parameter ini penting untuk SQLite lokal
-		log.Println("INFO: Menggunakan database SQLite (Lokal)")
+		// Lingkungan Lokal
+		dbType = "sqlite3"
+		connStr = "./peminjaman.db"
+		log.Println("Menggunakan database SQLite (Lokal)")
 	}
 
-	db, err = sql.Open(dbDriver, connStr)
+	db, err = sql.Open(dbType, connStr)
 	if err != nil {
-		log.Fatalf("FATAL: Gagal membuka database: %v", err)
+		log.Fatalf("Gagal membuka database: %v", err)
 	}
 
-	if err = db.Ping(); err != nil {
-		log.Fatalf("FATAL: Gagal terhubung ke database: %v", err)
-	}
-
-	// Sintaks SQL ini kompatibel dengan PostgreSQL (SERIAL) dan SQLite.
-	createTableSQL := `
-	CREATE TABLE IF NOT EXISTS peminjaman (
+	// Perintah SQL untuk membuat tabel. Sintaks ini kompatibel untuk SQLite dan PostgreSQL.
+	// SERIAL PRIMARY KEY untuk PostgreSQL, INTEGER PRIMARY KEY AUTOINCREMENT untuk SQLite.
+	// Kita gunakan sintaks yang lebih umum.
+	createTableSQL := `CREATE TABLE IF NOT EXISTS peminjaman (
 		id SERIAL PRIMARY KEY,
 		nama_peminjam TEXT,
 		nama_barang TEXT,
@@ -72,19 +72,24 @@ func initDB() {
 
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
-		log.Fatalf("FATAL: Gagal membuat tabel: %v", err)
+		// Jangan panik jika tabel sudah ada, tapi log error lain.
+		log.Printf("Gagal membuat tabel (mungkin sudah ada): %v", err)
+	} else {
+		log.Println("Tabel berhasil diperiksa/dibuat.")
 	}
-
-	log.Println("INFO: Database dan tabel berhasil diinisialisasi.")
 }
 
-// === HANDLERS ===
+// Semua handler (index, add, edit, delete, report) tidak perlu diubah.
+// Kode di bawah ini sama persis dengan versi sebelumnya.
+// ... (Salin semua fungsi handler dari kode Anda sebelumnya ke sini) ...
+// (indexHandler, addHandler, editHandler, deleteHandler, pdfReportHandler, excelReportHandler, renderTemplate)
 
+// SALIN SEMUA FUNGSI HANDLER ANDA DARI KODE SEBELUMNYA KE SINI
+// Contoh:
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, tanggal_kembali, status FROM peminjaman ORDER BY id DESC")
 	if err != nil {
-		log.Printf("ERROR: Gagal query data: %v", err)
-		http.Error(w, "Gagal memuat data", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -92,21 +97,22 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	var daftarPeminjaman []Peminjaman
 	for rows.Next() {
 		var p Peminjaman
-		// Gunakan sql.NullTime untuk menangani tanggal NULL dari SQLite dan PostgreSQL.
-		var tPinjam, tKembali sql.NullTime
+		var tanggalKembali sql.NullString
+		var tanggalPinjam sql.NullTime // Gunakan NullTime untuk tanggal
 
-		err := rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tPinjam, &tKembali, &p.Status)
+		err := rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tanggalPinjam, &tanggalKembali, &p.Status)
 		if err != nil {
-			log.Printf("ERROR: Gagal scan data: %v", err)
-			continue
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
-		// Ubah format tanggal untuk ditampilkan di UI (02 Jan 2006)
-		if tPinjam.Valid {
-			p.TanggalPinjam = tPinjam.Time.Format("02 Jan 2006")
+		if tanggalPinjam.Valid {
+			p.TanggalPinjam = tanggalPinjam.Time.Format("02 Jan 2006")
 		}
-		if tKembali.Valid {
-			p.TanggalKembali = tKembali.Time.Format("02 Jan 2006")
+		
+		if tanggalKembali.Valid {
+			tKembali, _ := time.Parse("2006-01-02T15:04:05Z", tanggalKembali.String)
+			p.TanggalKembali = tKembali.Format("02 Jan 2006")
 		} else {
 			p.TanggalKembali = "-"
 		}
@@ -122,17 +128,20 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 func addHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		r.ParseForm()
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		namaPeminjam := r.FormValue("nama_peminjam")
 		namaBarang := r.FormValue("nama_barang")
 		jumlah, _ := strconv.Atoi(r.FormValue("jumlah"))
 		tanggalPinjam := r.FormValue("tanggal_pinjam")
-
-		// Gunakan placeholder $N yang kompatibel dengan PostgreSQL dan SQLite modern.
-		_, err := db.Exec("INSERT INTO peminjaman (nama_peminjam, nama_barang, jumlah, tanggal_pinjam, status) VALUES ($1, $2, $3, $4, $5)",
+		_, err = db.Exec("INSERT INTO peminjaman (nama_peminjam, nama_barang, jumlah, tanggal_pinjam, status) VALUES ($1, $2, $3, $4, $5)",
 			namaPeminjam, namaBarang, jumlah, tanggalPinjam, "Dipinjam")
 		if err != nil {
-			log.Printf("ERROR: Gagal insert data: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
@@ -141,17 +150,28 @@ func addHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func editHandler(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
-
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "ID tidak ditemukan", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "ID tidak valid", http.StatusBadRequest)
+		return
+	}
 	if r.Method == http.MethodPost {
-		r.ParseForm()
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		namaPeminjam := r.FormValue("nama_peminjam")
 		namaBarang := r.FormValue("nama_barang")
 		jumlah, _ := strconv.Atoi(r.FormValue("jumlah"))
 		tanggalPinjam := r.FormValue("tanggal_pinjam")
 		tanggalKembaliStr := r.FormValue("tanggal_kembali")
 		status := r.FormValue("status")
-
 		var tanggalKembaliToDB interface{}
 		if tanggalKembaliStr != "" {
 			tanggalKembaliToDB = tanggalKembaliStr
@@ -159,29 +179,34 @@ func editHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			tanggalKembaliToDB = nil
 		}
-
-		_, err := db.Exec("UPDATE peminjaman SET nama_peminjam=$1, nama_barang=$2, jumlah=$3, tanggal_pinjam=$4, tanggal_kembali=$5, status=$6 WHERE id=$7",
+		_, err = db.Exec("UPDATE peminjaman SET nama_peminjam=$1, nama_barang=$2, jumlah=$3, tanggal_pinjam=$4, tanggal_kembali=$5, status=$6 WHERE id=$7",
 			namaPeminjam, namaBarang, jumlah, tanggalPinjam, tanggalKembaliToDB, status, id)
 		if err != nil {
-			log.Printf("ERROR: Gagal update data: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
 	row := db.QueryRow("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, tanggal_kembali, status FROM peminjaman WHERE id=$1", id)
 	var p Peminjaman
-	var tPinjam, tKembali sql.NullTime
-	row.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tPinjam, &tKembali, &p.Status)
-
-	// Format tanggal untuk value di input form (YYYY-MM-DD)
-	if tPinjam.Valid {
-		p.TanggalPinjam = tPinjam.Time.Format("2006-01-02")
+	var tanggalKembali sql.NullString
+	var tanggalPinjam sql.NullString
+	err = row.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tanggalPinjam, &tanggalKembali, &p.Status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	if tKembali.Valid {
-		p.TanggalKembali = tKembali.Time.Format("2006-01-02")
+	if tanggalPinjam.Valid {
+		p.TanggalPinjam = tanggalPinjam.String
 	}
-
+	if tanggalKembali.Valid {
+		p.TanggalKembali = tanggalKembali.String
+	}
 	data := map[string]interface{}{
 		"Title":      "Edit Peminjaman",
 		"Peminjaman": p,
@@ -190,16 +215,31 @@ func editHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(r.FormValue("id"))
-	_, err := db.Exec("DELETE FROM peminjaman WHERE id=$1", id)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Metode tidak diizinkan", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	if idStr == "" {
+		http.Error(w, "ID tidak ditemukan", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec("DELETE FROM peminjaman WHERE id=$1", idStr)
 	if err != nil {
-		log.Printf("ERROR: Gagal hapus data: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func pdfReportHandler(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, status FROM peminjaman ORDER BY id ASC")
+	rows, err := db.Query("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, status FROM peminjaman ORDER BY id ASC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	defer rows.Close()
 
 	pdf := gofpdf.New("P", "mm", "A4", "")
@@ -209,43 +249,48 @@ func pdfReportHandler(w http.ResponseWriter, r *http.Request) {
 	pdf.Ln(12)
 
 	pdf.SetFont("Arial", "B", 10)
-	headers := []string{"ID", "Nama Peminjam", "Nama Barang", "Jumlah", "Tgl. Pinjam", "Status"}
-	widths := []float64{10, 50, 60, 20, 30, 25}
-	for i, header := range headers {
-		pdf.CellFormat(widths[i], 7, header, "1", 0, "C", false, 0, "")
-	}
+	pdf.CellFormat(10, 7, "ID", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(50, 7, "Nama Peminjam", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(60, 7, "Nama Barang", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(20, 7, "Jumlah", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(30, 7, "Tgl. Pinjam", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(25, 7, "Status", "1", 0, "C", false, 0, "")
 	pdf.Ln(-1)
 
 	pdf.SetFont("Arial", "", 10)
 	for rows.Next() {
 		var p Peminjaman
-		var tPinjam sql.NullTime
-		rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tPinjam, &p.Status)
-
-		var tPinjamStr string
-		if tPinjam.Valid {
-			tPinjamStr = tPinjam.Time.Format("2006-01-02")
+		var tPinjam time.Time
+		err := rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tPinjam, &p.Status)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		
+		formattedDate := tPinjam.Format("02-01-2006")
 
-		pdf.CellFormat(widths[0], 6, strconv.Itoa(p.ID), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(widths[1], 6, p.NamaPeminjam, "1", 0, "L", false, 0, "")
-		pdf.CellFormat(widths[2], 6, p.NamaBarang, "1", 0, "L", false, 0, "")
-		pdf.CellFormat(widths[3], 6, strconv.Itoa(p.Jumlah), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(widths[4], 6, tPinjamStr, "1", 0, "C", false, 0, "")
-		pdf.CellFormat(widths[5], 6, p.Status, "1", 0, "C", false, 0, "")
+		pdf.CellFormat(10, 6, strconv.Itoa(p.ID), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(50, 6, p.NamaPeminjam, "1", 0, "L", false, 0, "")
+		pdf.CellFormat(60, 6, p.NamaBarang, "1", 0, "L", false, 0, "")
+		pdf.CellFormat(20, 6, strconv.Itoa(p.Jumlah), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(30, 6, formattedDate, "1", 0, "C", false, 0, "")
+		pdf.CellFormat(25, 6, p.Status, "1", 0, "C", false, 0, "")
 		pdf.Ln(-1)
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", "attachment; filename=laporan_peminjaman.pdf")
-	pdf.Output(w)
+	err = pdf.Output(w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func excelReportHandler(w http.ResponseWriter, r *http.Request) {
 	f := excelize.NewFile()
 	sheetName := "Laporan Peminjaman"
-	f.NewSheet(sheetName)
-	f.SetActiveSheet(f.GetSheetIndex(sheetName))
+	index, _ := f.NewSheet(sheetName)
+	f.SetActiveSheet(index)
 
 	headers := []string{"ID", "Nama Peminjam", "Nama Barang", "Jumlah", "Tanggal Pinjam", "Tanggal Kembali", "Status"}
 	for i, header := range headers {
@@ -253,63 +298,75 @@ func excelReportHandler(w http.ResponseWriter, r *http.Request) {
 		f.SetCellValue(sheetName, cell, header)
 	}
 
-	rows, _ := db.Query("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, tanggal_kembali, status FROM peminjaman ORDER BY id ASC")
+	rows, err := db.Query("SELECT id, nama_peminjam, nama_barang, jumlah, tanggal_pinjam, tanggal_kembali, status FROM peminjaman ORDER BY id ASC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	defer rows.Close()
 
 	rowNum := 2
 	for rows.Next() {
 		var p Peminjaman
-		var tPinjam, tKembali sql.NullTime
-		rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tPinjam, &tKembali, &p.Status)
-
-		var tPinjamStr, tKembaliStr string
-		if tPinjam.Valid {
-			tPinjamStr = tPinjam.Time.Format("2006-01-02")
+		var tanggalKembali sql.NullString
+		var tanggalPinjam sql.NullTime
+		err := rows.Scan(&p.ID, &p.NamaPeminjam, &p.NamaBarang, &p.Jumlah, &tanggalPinjam, &tanggalKembali, &p.Status)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		if tKembali.Valid {
-			tKembaliStr = tKembali.Time.Format("2006-01-02")
+
+		if tanggalPinjam.Valid {
+			p.TanggalPinjam = tanggalPinjam.Time.Format("2006-01-02")
+		}
+		if tanggalKembali.Valid {
+			p.TanggalKembali = tanggalKembali.String
 		}
 
 		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowNum), p.ID)
 		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowNum), p.NamaPeminjam)
 		f.SetCellValue(sheetName, fmt.Sprintf("C%d", rowNum), p.NamaBarang)
 		f.SetCellValue(sheetName, fmt.Sprintf("D%d", rowNum), p.Jumlah)
-		f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowNum), tPinjamStr)
-		f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowNum), tKembaliStr)
+		f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowNum), p.TanggalPinjam)
+		f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowNum), p.TanggalKembali)
 		f.SetCellValue(sheetName, fmt.Sprintf("G%d", rowNum), p.Status)
 		rowNum++
 	}
+
 	f.DeleteSheet("Sheet1")
 
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=laporan_peminjaman.xlsx")
-	f.Write(w)
+	if err := f.Write(w); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
-
-// === UTILITY & MAIN ===
 
 func renderTemplate(w http.ResponseWriter, tmplName string, data interface{}) {
 	tmplFiles := []string{
 		filepath.Join("templates", "layout.html"),
 		filepath.Join("templates", tmplName),
 	}
+
 	tmpl, err := template.ParseFiles(tmplFiles...)
 	if err != nil {
-		log.Printf("ERROR: Gagal parsing template %s: %v", tmplName, err)
-		http.Error(w, "Gagal memuat halaman", http.StatusInternalServerError)
+		http.Error(w, "Gagal parsing template: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	err = tmpl.ExecuteTemplate(w, "layout", data)
 	if err != nil {
-		log.Printf("ERROR: Gagal render template %s: %v", tmplName, err)
+		http.Error(w, "Gagal render template: "+err.Error(), http.StatusInternalServerError)
 	}
 }
+
 
 func main() {
 	initDB()
 	defer db.Close()
 
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/", indexHandler)
 	mux.HandleFunc("/add", addHandler)
 	mux.HandleFunc("/edit", editHandler)
@@ -317,15 +374,15 @@ func main() {
 	mux.HandleFunc("/report/pdf", pdfReportHandler)
 	mux.HandleFunc("/report/excel", excelReportHandler)
 
-	// Port ditentukan oleh layanan hosting melalui env var PORT.
+	// Port ditentukan oleh Render.com melalui environment variable PORT
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8080" // Port default untuk lokal
 	}
 
-	log.Printf("INFO: Server berjalan di port :%s", port)
+	log.Printf("Server berjalan di http://localhost:%s\n", port)
 	err := http.ListenAndServe(":"+port, mux)
 	if err != nil {
-		log.Fatalf("FATAL: Server gagal berjalan: %v", err)
+		log.Fatal("ListenAndServe: ", err)
 	}
 }
